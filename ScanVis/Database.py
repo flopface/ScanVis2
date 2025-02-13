@@ -1,5 +1,6 @@
 from .Images import *
 from .Scan import *
+from .Brain import *
 from .Segmentation import *
 import numpy as np
 from os import listdir
@@ -21,7 +22,7 @@ class Database(MutableMapping):
 
   def validate_folders(self):
     failed = False
-    for key, folder in self.kf.items():
+    for folder in self.kf.values():
       if not isdir(folder): 
         failed = True
         print(f'{folder} does not exist')
@@ -29,12 +30,12 @@ class Database(MutableMapping):
     self.trim_excess()
 
   def trim_excess(self):
-    self.files = set([file[:file.find('.')] for file in listdir(list(self.kf.values())[0]) if file[0] != '.'])
+    self.ids = set([file[:file.find('.')] for file in listdir(list(self.kf.values())[0]) if file[0] != '.'])
     for folder in list(self.kf.values())[1:]:
-      files = set([file[:file.find('.')] for file in listdir(folder) if file[0] != '.'])
-      self.files = self.files.intersection(files)
-    self.files = sorted(list(self.files))
-    self.dictionary = dict(zip(files, [None]*len(files)))
+      ids = set([file[:file.find('.')] for file in listdir(folder) if file[0] != '.'])
+      self.ids = self.ids.intersection(ids)
+    self.ids = sorted(list(self.ids))
+    self.dictionary = dict(zip(ids, [None]*len(ids)))
 
   def find_file(self, folder, id):
     for file in listdir(folder): 
@@ -45,31 +46,76 @@ class Database(MutableMapping):
       return self.scan(id)
     return self.image(id)
 
-  def image(self, id) -> Image:
-    options = [file for file in self.files if id in file]
+  def find_id(self, id) -> str:
+    if type(id) is not str: id = str(id)
+    options = [proper_id for proper_id in self.ids if id in proper_id]
     if len(options) == 0: raise Exception(f'No data with that ID')
-    elif len(options) == 1: file = options[0]
-    else: file = user_decision(options)
+    elif len(options) == 1: return options[0]
+    else: return user_decision(options)
+
+  def brain(self, id, key = 'scan', seg_key = 'seg') -> Brain:
+    if (key in self.kf):
+      if seg_key in self.kf:
+        proper_id = self.find_id(id)
+        return Brain(self.find_file(self.kf[key], proper_id), Segmentation(self.find_file(self.kf[seg_key], proper_id)), id, mask = True)
+      else: raise Exception('No segmentations labelled in Database')
+    else: raise Exception('No scans labelled in database')
+
+  def array3d(self, proper_id, key) -> Array3D:
+    return Array3D(self.find_file(self.kf[key], proper_id))
+
+  def images(self, id) -> Images:
+    proper_id = self.find_id(id)
     seg = None
     images = []
     for key, folder in self.kf.items():
       if key in ['seg', 'segmentation']: seg = Segmentation(self.find_file(folder, file))
-      else: images.append(Image(key, self.find_file(folder, file)))
+      else: images.append(Image(key, self.find_file(folder, proper_id)))
     return Images(images, id, seg)
   
   def scan(self, id) -> Scan:
     if ('scan' in self.kf):
       if 'seg' in self.kf or 'segmentation' in self.kf:
-        options = [file for file in self.files if id in file]
-        if len(options) == 0: raise Exception(f'No data with that ID')
-        elif len(options) == 1: file = options[0]
-        else: file = user_decision(options)
-        return Scan(self.find_file(self.kf['scan'], file), self.find_file(self.kf['seg' if 'seg' in self.kf else 'segmentation'], file), id)
+        proper_id = self.find_id(id)
+        return Scan(self.find_file(self.kf['scan'], proper_id), self.find_file(self.kf['seg' if 'seg' in self.kf else 'segmentation'], proper_id), id)
       else: raise Exception('No segmentations labelled in Database')
     else: raise Exception('No scans labelled in database')
 
-  def __getitem__(self, key) -> Image:
-    return self.dictionary[key]
+  def standardise_space(self, id : str, save_folder : str):
+    fix = self.brain(id)
+    for proper_id in self.ids:
+      self.brain(proper_id).register
+      return
+
+  def timepoint_warp(self, fix_key : str, mov_key : str, supress_print = False, save_folder = None, seg_folder = None, jacobian_folder = None, transform_folder = None):
+    if fix_key not in self.kf.keys(): raise FileNotFoundError('Fixed folder not found in database')
+    if mov_key not in self.kf.keys(): raise FileNotFoundError('Moving folder not found in database')
+    return_result = transform_folder is None
+
+    if jacobian_folder is None and transform_folder is None and save_folder is None: raise Exception('No output folder given, nothing will happen dummy')
+
+    for i, proper_id in enumerate(self.ids):
+      if not supress_print: progress_word(i, len(self.ids), 'YOU ARE REALLY HANDSOME BRO')
+      fix = self.array3d(proper_id, fix_key)
+      mov = self.array3d(proper_id, mov_key)
+      result = mov.register(fix, return_result)
+      if save_folder is not None: 
+        mov.transform(result['fwdtransforms'], fix)
+        mov.save(os.path.join(save_folder, proper_id))
+      if jacobian_folder is not None:
+        mov.array = ants.create_jacobian_determinant_image(fix.ants, result['fwdtransforms'][0]).numpy()
+        mov.save(os.path.join(jacobian_folder, proper_id))
+      if transform_folder is not None:
+        os.makedirs(os.path.join(transform_folder, proper_id))
+        os.path.rename(result['fwdtransforms'][0], os.path.join(transform_folder, proper_id, 'warp' if 'warp' in result['fwdtransforms'][0].lower() else 'affine'))
+        os.path.rename(result['fwdtransforms'][1], os.path.join(transform_folder, proper_id, 'warp' if 'warp' in result['fwdtransforms'][1].lower() else 'affine'))
+    if not supress_print: progress_word(i, len(self.ids), 'YOU ARE REALLY HANDSOME BRO')
+        
+  def __getitem__(self, name) -> Image:
+    if name in self.dictionary:
+      if self.dictionary[name] is None: self.dictionary[name] = self.__call__(name)
+      return self.dictionary[name]
+    raise AttributeError(f"Database object has no attribute '{name}'")
   
   def __setitem__(self, key, image : Image):
     self.dictionary[key] = image

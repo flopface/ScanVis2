@@ -6,13 +6,14 @@ from typing import Literal
 from .useful_stuff import *
 from .Segmentation import *
 from .Array3D import *
-from matplotlib.colors import LinearSegmentedColormap, ListedColormap, to_rgb, to_rgba, cnames
+from matplotlib.colors import LinearSegmentedColormap, ListedColormap, to_rgba, cnames
 
 cnames = list(cnames)
 
 class Image(Array3D):
   def __init__(self, key : str, data, seg : Segmentation = Segmentation(None), id = None, mask = False, normalise = True, centre = None, cmap = 'inferno'):
     super().__init__(data)
+    if type(seg) != Segmentation: seg = Segmentation(seg)
     self.id = key if id is None else id
     self.key = key
     self.normalise_color(normalise, centre)
@@ -58,7 +59,8 @@ class Image(Array3D):
 
   def mask_image(self):
     mask = self.seg.get_mask()
-    self.array = self.array * mask
+    t = type(self.array[0,0,0])
+    self.array = (self.array * mask).astype(t)
     if self.centre is not None: self.array += self.centre * (~mask.astype(bool)).astype(int)
 
   def plot(self, view : Literal['Saggittal', 'Axial', 'Coronal'] = 'Saggittal', slice = 128, structure_id = [], title = None, fontsize = 8, ms = 2, c = 'w', fill_alpha = 0.2, outline_alpha = 1, flipped = False, ax = None, figsize = (5,  5), dpi = 100, save = None, plot_legend = True):
@@ -76,6 +78,7 @@ class Image(Array3D):
     cn = ''.join([f'\'{col}\',' for col in cnames])[:-1]
     if type(c) not in [list, np.ndarray]: c = [c]
     initial_structures = [2, 41, 7, 46, 16, 3, 42, 8, 47] + [1] * 68
+    if self.seg.isNone: c = []
 
     # Setting up strings containing a function to be called, and an interact calling it, with custom inputs to vary the UI
     func_str = f'def plot_str(view, {"".join([f"structure_{i+1} = {initial_structures[i]}, color_{i+1} = \'{cnames[i]}\', " if col is None else f"structure_{i+1} = {initial_structures[i]}, " for i, col in enumerate(c)])}'
@@ -150,7 +153,7 @@ class Image(Array3D):
     if save != None: plt.savefig(save, dpi = 600, bbox_inches = 'tight')
     plt.show()
 
-  def interactive_compare_rgb(self, other : Image, ms = 2, c = 'w', fill_alpha = 0, outline_alpha = 1, flipped = False, title = None, fontsize = 8, figsize = (10, 5), dpi = 100):
+  def interactive_compare_rgb(self, other : Image, ms = 2, c = [], fill_alpha = 0, outline_alpha = 1, flipped = False, title = None, fontsize = 8, figsize = (10, 5), dpi = 100):
     N = int(len(c)/2) if type(c) != str else 1
     func_str = \
       f'def compare_rgb_str(view, {"".join([f"structure_{i+1} = {i+2}, " for i in range(N)])}slice = 100):\n'\

@@ -18,3 +18,6 @@ class Scan(Images):
       if id != split(self.seg_file)[1][:5]: print('Warning : Scan ID does not match Segmentation ID')
     self.id = id
     for image in self.values(): image.set_id(self.id)
+
+  def register(self, fix : Union[ants.core.ants_image.ANTsImage, Array3D, Image, Images], key : str = 'brain', return_result = False):
+    return super().register(fix, key, return_result)

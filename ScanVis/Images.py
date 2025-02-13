@@ -36,8 +36,7 @@ class Images(MutableMapping):
     for im in self.images.values(): im.transform(transform, fix)
     list(self.images.values())[0].seg.transform(transform, fix)
 
-
-  def register(self, fix : Union[ants.core.ants_image.ANTsImage, Array3D, Image, Images], key = 'brain', return_result = False):
+  def register(self, fix : Union[ants.core.ants_image.ANTsImage, Array3D, Image, Images], key : str, return_result = False):
     if type(fix) not in [ants.core.ants_image.ANTsImage, Array3D, Image]: fix = fix.images[key]
     if type(fix) != ants.core.ants_image.ANTsImage: fix = fix.ants
     result = self.images[key].register(fix, return_result = True)

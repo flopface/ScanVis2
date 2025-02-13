@@ -15,15 +15,15 @@ class Array3D():
     self.isNone = False
     self.spacing = [1,1,1]
     self.direction = [[1,0,0],[0,-0,-1],[0,-1,0]]
-
+    
     if type(data) is type(None): 
-      data = np.zeros((256, 256, 256)).astype(int)
+      self.array = np.zeros((256, 256, 256)).astype(int)
       self.origin = [-128,128,128]
       self.isNone = True
     elif type(data) is np.ndarray:
       if len(data.shape) == 3: 
         self.array = data
-        self.origin = [-int(data.shape[0]/2),int(data.shape[1]/2),int(data.shape[2]/2)]
+        self.origin = [-int(self.array.shape[0]/2),int(self.array.shape[1]/2),int(self.array.shape[2]/2)]
       else: raise TypeError(f'Input data must be 3D - current shape = {data.shape}')
     elif type(data) is str:
       if not os.path.isfile(data): raise Exception(f'{data} not found')
@@ -35,7 +35,7 @@ class Array3D():
         self.origin = im.GetOrigin()
       elif data[-4:] == '.npy': 
         self.array = np.load(data)
-        self.origin = [-int(data.shape[0]/2),int(data.shape[1]/2),int(data.shape[2]/2)]
+        self.origin = [-int(self.array.shape[0]/2),int(self.array.shape[1]/2),int(self.array.shape[2]/2)]
     else: raise TypeError(f'Input data must be path to .nii or .npy, or an array, not {data}')
 
   def get_slice(self, view : Literal['Saggittal', 'Axial', 'Coronal'], slice):
@@ -55,11 +55,19 @@ class Array3D():
   
   @property
   def ants(self):
-    ants_image = ants.from_numpy(self.array)
-    ants_image.set_spacing(self.spacing)
-    ants_image.set_origin(self.origin)
-    ants_image.set_direction(self.direction)
-    return ants_image
+    img = ants.from_numpy(self.array)
+    img.set_spacing(self.spacing)
+    img.set_origin(self.origin)
+    img.set_direction(self.direction)
+    return img
+
+  @property
+  def sitk(self):
+    img = sitk.GetImageFromArray(self.array)
+    img.SetSpacing(self.spacing)
+    img.SetOrigin(self.origin)
+    img.SetDirection(self.direction.flatten())
+    return img
   
   def transform(self, transform : str, fix : Union[ants.core.ants_image.ANTsImage, Array3D]):
     if type(fix) != ants.core.ants_image.ANTsImage: fix = fix.ants
@@ -76,3 +84,15 @@ class Array3D():
     )
     if return_result: return result
     self.transform(result['fwdtransforms'], fix)
+
+  def save(self, save: str = '.', nii: bool = None):
+    if save == '': save = '.'
+    if os.path.isdir(save): save = os.path.join(save, self.id)
+    if nii is None:
+      if 'nii' in save: nii = True
+      else: nii = False
+    elif '.nii' not in save and '.npy' not in save: save += '.nii' if nii else '.npy'
+    folder = os.path.dirname(save)
+    if folder and not os.path.exists(folder): raise FileNotFoundError(f'The folder {folder} does not exist.')
+    if nii: sitk.WriteImage(self.sitk, save)
+    else: np.save(save, self.array)
